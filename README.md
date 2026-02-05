@@ -2,6 +2,20 @@
 
 An advanced AI application demonstrating **Agentic Workflows** and **Multilingual Property Graph RAG** to preserve the authenticity of Bangladeshi cuisine.
 
+graph TD
+    A[User Query: Bengali/English] --> B{Agent Router}
+    B --> C[Researcher Node]
+    C --> D[Property Graph + Vector Store]
+    D --> E[Draft Recipe]
+    E --> F[Critic Node]
+    F -- "Rejected (Feedback Loop)" --> C
+    F -- "Validated (AUTHENTIC)" --> G[Streamlit UI Output]
+    
+    subgraph "Knowledge Logic"
+    D -.-> H[Entity Extraction: GPT-4o-mini]
+    D -.-> I[Relationship Mapping]
+    end
+
 ## Technical Highlights
 - **Frameworks:** LangGraph (State Machines), LlamaIndex (Data Orchestration).
 - **Core Logic:** Property Graph Indexing for entity-relationship mapping (Spices → Techniques → Dishes).
