@@ -1,7 +1,10 @@
 # Bangladeshi Chef
 
-An advanced AI application demonstrating **Agentic Workflows** and **Multilingual Property Graph RAG** to preserve the authenticity of Bangladeshi cuisine.
+AI application demonstrating **Agentic Workflows** and **Multilingual Property Graph RAG** to preserve the authenticity of Bangladeshi cuisine.
 
+### System Architecture
+
+```mermaid
 graph TD
     A[User Query: Bengali/English] --> B{Agent Router}
     B --> C[Researcher Node]
@@ -15,6 +18,7 @@ graph TD
     D -.-> H[Entity Extraction: GPT-4o-mini]
     D -.-> I[Relationship Mapping]
     end
+```
 
 ## Technical Highlights
 - **Frameworks:** LangGraph (State Machines), LlamaIndex (Data Orchestration).
