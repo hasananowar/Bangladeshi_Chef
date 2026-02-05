@@ -10,7 +10,7 @@ An advanced AI application demonstrating **Agentic Workflows** and **Multilingua
 
 
 
-## 💡Importance of this App
+## Importance of this App
 Standard RAG (Vector-only) often fails in specialized domains like regional cooking because:
 1. **Context Loss:** It treats ingredients as flat lists. Our **Property Graph** understands that *Mustard Oil* is a prerequisite for *Shorshe Ilish*, not just an optional fat.
 2. **Hallucination:** Generic LLMs often "Westernize" recipes. This app uses a **Critic Agent** to enforce traditional Bangladeshi culinary standards.

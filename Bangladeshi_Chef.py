@@ -1,146 +1,125 @@
 import os
 import sys
-from typing import TypedDict, List
+from dotenv import load_dotenv
+
+# 1. Force Load Environment Variables
+load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    print(" API Key Missing")
+    sys.exit(1)
+os.environ["OPENAI_API_KEY"] = api_key
+
+from typing import TypedDict
 from langgraph.graph import StateGraph, END
-from llama_index.core import PropertyGraphIndex, SimpleDirectoryReader, Settings
+from llama_index.core import (
+    PropertyGraphIndex, 
+    SimpleDirectoryReader, 
+    Settings, 
+    StorageContext
+)
 from llama_index.core.indices.property_graph import SchemaLLMPathExtractor
 from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
 from langchain_openai import ChatOpenAI
-from dotenv import load_dotenv
 
-load_dotenv()
-
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    print("CRITICAL ERROR: API_KEY not found.")
-    print("Please create a file named .env in this folder: ", os.getcwd())
-    sys.exit(1)
-else:
-    print(f"API Key loaded: {api_key[:5]}...*******")
-
-os.environ["OPENAI_API_KEY"] = api_key
-
-# --- 0. Configuration & Knowledge Graph Setup ---
-# Use GPT-4o for robust Bengali handling
-Settings.llm = OpenAI(model="gpt-4o")
+# 2. Configuration
+Settings.llm = OpenAI(model="gpt-4o", temperature=0.1)
+extraction_llm = OpenAI(model="gpt-4o-mini", temperature=0.0)
 Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-large")
+PERSIST_DIR = "./storage"
 
-# Define the Knowledge Graph Schema for Cooking
-entities = ["INGREDIENT", "SPICE", "TECHNIQUE", "DISH", "UTENSIL"]
-relations = ["REQUIRED_FOR", "PAIRS_WITH", "USED_IN", "PREPARED_VIA", "ALTERNATE_OF"]
+# 3. Robust Loading/Indexing Logic
+try:
+    if os.path.exists(PERSIST_DIR):
+        print("--- Loading Existing Knowledge Graph ---")
+        storage_context = StorageContext.from_defaults(persist_dir=PERSIST_DIR)
+        # Fix for the ValueError: explicitly pass the graph_store
+        index = PropertyGraphIndex(
+            property_graph_store=storage_context.property_graph_store,
+            storage_context=storage_context,
+            llm=Settings.llm,
+            embed_model=Settings.embed_model
+        )
+    else:
+        raise FileNotFoundError
+except Exception as e:
+    print(f"--- Index not found or corrupted ({e}). Creating new... ---")
+    documents = SimpleDirectoryReader("./data").load_data()
+    documents = documents[:2]
+    # For testing, you might want documents = documents[:20]
+    
+    kg_extractor = SchemaLLMPathExtractor(
+        llm=extraction_llm,
+        possible_entities=["INGREDIENT", "SPICE", "TECHNIQUE", "DISH"],
+        possible_relations=["REQUIRED_FOR", "PAIRS_WITH", "USED_IN"],
+        strict=False
+    )
 
-validation_schema = {
-    "SPICE": ["REQUIRED_FOR", "PAIRS_WITH"],
-    "INGREDIENT": ["USED_IN", "PREPARED_VIA"],
-    "DISH": ["PREPARED_VIA"]
-}
+    index = PropertyGraphIndex.from_documents(
+        documents,
+        kg_extractors=[kg_extractor],
+        show_progress=True
+    )
+    index.storage_context.persist(persist_dir=PERSIST_DIR)
 
-kg_extractor = SchemaLLMPathExtractor(
-    llm=Settings.llm,                    # Pass the LLM explicitly
-    possible_entities=entities,          # WAS: entity_types
-    possible_relations=relations,        # WAS: relation_types
-    kg_validation_schema=validation_schema, # WAS: validation_schema
-    strict=False
-)
-
-print("--- Indexing Knowledge Graph (This may take time) ---")
-# Ensure your PDF is in the './data' folder
-documents = SimpleDirectoryReader("./data").load_data()
-index = PropertyGraphIndex.from_documents(
-    documents,
-    kg_extractors=[kg_extractor],
-    show_progress=True
-)
-print("--- Indexing Complete ---")
-
-# --- 1. Define Agent State ---
+# 4. Agent Nodes with Iteration Tracking
 class ChefState(TypedDict):
     query: str
     recipe_draft: str
     is_authentic: bool
     feedback: str
-    iteration_count: int
+    iterations: int # Track loops to prevent infinite cycles
 
-# --- 2. Define Nodes ---
-
-# Node A: The Researcher (Uses the Knowledge Graph)
-kg_engine = index.as_query_engine(include_text=True)
+kg_engine = index.as_query_engine(include_text=True, similarity_top_k=5)
 
 def research_recipe(state: ChefState):
-    print(f"--- Researcher Working (Iteration {state.get('iteration_count', 0)}) ---")
+    iters = state.get("iterations", 0)
+    print(f"--- Researcher working (Attempt {iters + 1}) ---")
     
-    # If there is feedback, append it to the query to refine the search
-    current_query = state["query"]
+    query = state["query"]
     if state.get("feedback"):
-        current_query = f"{state['query']}. IMPORTANT adjustment based on critic feedback: {state['feedback']}"
+        query += f" The previous attempt was rejected. Fix this: {state['feedback']}"
     
-    # Query the Property Graph
-    res = kg_engine.query(current_query)
-    
-    return {
-        "recipe_draft": str(res), 
-        "iteration_count": state.get("iteration_count", 0) + 1
-    }
-
-# Node B: The Critic (Checks Authenticity)
-critic_llm = ChatOpenAI(model="gpt-4o")
+    res = kg_engine.query(query)
+    return {"recipe_draft": str(res), "iterations": iters + 1}
 
 def critique_recipe(state: ChefState):
     print("--- Critic Reviewing ---")
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
     
-    # Bengali System Prompt for the Critic
-    system_instruction = """
-    আপনি একজন কঠোর বাংলাদেশী খাদ্য সমালোচক। প্রদত্ত রেসিপিটি খাঁটি কিনা তা যাচাই করুন।
-    - সরিষার তেল, পাঁচ ফোড়ন বা বাগার দেওয়া ঠিকমতো হয়েছে কিনা দেখুন।
-    - যদি সব ঠিক থাকে, তবে শুধু 'AUTHENTIC' শব্দটি লিখুন।
-    - যদি ভুল থাকে, তবে ইংরেজিতে বা বাংলায় স্পষ্ট করে লিখুন কী কী বাদ পড়েছে।
-    """
-    
-    prompt = f"{system_instruction}\n\nRecipe to check: {state['recipe_draft']}"
-    res = critic_llm.invoke(prompt)
-    
-    response_text = res.content
-    is_authentic = "AUTHENTIC" in response_text.upper()
-    
-    return {"feedback": response_text, "is_authentic": is_authentic}
+    # If the researcher already said it can't find info, don't loop forever
+    if "sorry" in state["recipe_draft"].lower() or "not possible" in state["recipe_draft"].lower():
+        return {"is_authentic": False, "feedback": "Data not found in source PDF."}
 
-# --- 3. Build the Graph ---
-workflow = StateGraph(ChefState)
+    prompt = (
+        "Review this Bengali recipe for authenticity. "
+        "If it is a complete and correct recipe, reply ONLY with 'AUTHENTIC'. "
+        "Otherwise, explain what is missing."
+        f"\n\nRecipe: {state['recipe_draft']}"
+    )
+    res = llm.invoke(prompt)
+    feedback = res.content.strip()
+    return {"feedback": feedback, "is_authentic": "AUTHENTIC" in feedback.upper()}
 
-workflow.add_node("researcher", research_recipe)
-workflow.add_node("reviewer", critique_recipe)
-
-workflow.set_entry_point("researcher")
-workflow.add_edge("researcher", "reviewer")
-
-def check_authenticity(state: ChefState):
-    if state["is_authentic"]:
-        return "end"
-    # Safety break to prevent infinite loops
-    if state["iteration_count"] > 3:
-        return "end"
+# 5. Graph with "Stop Condition"
+def should_continue(state: ChefState):
+    # Stop if authentic OR if we've tried 3 times
+    if state["is_authentic"] or state["iterations"] >= 3:
+        return END
     return "researcher"
 
-workflow.add_conditional_edges(
-    "reviewer",
-    check_authenticity,
-    {"end": END, "researcher": "researcher"}
-)
+workflow = StateGraph(ChefState)
+workflow.add_node("researcher", research_recipe)
+workflow.add_node("reviewer", critique_recipe)
+workflow.set_entry_point("researcher")
+workflow.add_edge("researcher", "reviewer")
+workflow.add_conditional_edges("reviewer", should_continue)
 
 app = workflow.compile()
 
-# --- 4. Run the Agent ---
 if __name__ == "__main__":
-    inputs = {"query": "How to make authentic Shorshe Ilish?", "iteration_count": 0}
-    print(f"Querying: {inputs['query']}")
-    
-    # Stream the output
+    # Test query
+    inputs = {"query": "খাঁটি গরুর তেহারি রান্নার রেসিপি", "iterations": 0}
     for output in app.stream(inputs):
-        for key, value in output.items():
-            print(f"Finished Node: {key}")
-            if key == "reviewer":
-                print(f"Critic Status: {'Authentic' if value['is_authentic'] else ' Needs Improvement'}")
-    
-    print("\nFinal Recipe:")
-    print(output['reviewer'].get('feedback') if not output['reviewer']['is_authentic'] else "Recipe is Perfect.")
+        print(output)
