@@ -12,8 +12,8 @@ Settings.llm = OpenAI(model="gpt-4o", temperature=0.3)
 Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-large")
 
 # --- Page Config ---
-st.set_page_config(page_title="Rannaghorer Ostad AI", page_icon="🥘", layout="centered")
-st.title("রন্ধন ওস্তাদ (Bangladeshi Chef)")
+st.set_page_config(page_title="Bangladeshi Chef AI", page_icon="🥘", layout="centered")
+st.title("Bangladeshi Chef")
 st.markdown("আপনার ব্যক্তিগত AI শেফ। যেকোনো রেসিপির জন্য জিজ্ঞাসা করুন!")
 
 # --- Setup LlamaIndex ---

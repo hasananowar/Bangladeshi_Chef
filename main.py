@@ -46,8 +46,6 @@ try:
 except Exception as e:
     print(f"--- Index not found or corrupted ({e}). Creating new... ---")
     documents = SimpleDirectoryReader("./data").load_data()
-    documents = documents[:2]
-    # For testing, you might want documents = documents[:20]
     
     kg_extractor = SchemaLLMPathExtractor(
         llm=extraction_llm,
@@ -120,6 +118,6 @@ app = workflow.compile()
 
 if __name__ == "__main__":
     # Test query
-    inputs = {"query": "খাঁটি গরুর তেহারি রান্নার রেসিপি", "iterations": 0}
+    inputs = {"query": "তেহারি রান্নার রেসিপি", "iterations": 0}
     for output in app.stream(inputs):
         print(output)
