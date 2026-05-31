@@ -1,4 +1,4 @@
-# Bangladeshi Chef
+# Deshi Chef
 
 AI application demonstrating **Agentic Workflows** and **Multilingual Property Graph RAG** to preserve the authenticity of Bangladeshi cuisine.
 
